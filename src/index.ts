@@ -67,7 +67,6 @@ function sanitizeFilename(name: string): string {
 export default function planModeExtension(pi: ExtensionAPI): void {
 	let planModeEnabled = false;
 	let currentPlanPath: string | null = null;
-	let hasRequestedRename = false; // Track if we've asked for rename already
 
 	pi.registerFlag("plan", {
 		description: "Start in plan mode (read-only exploration)",
@@ -104,7 +103,6 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			const plansDir = path.join(getPlansDir(), sessionFolder);
 			const planFileName = generatePlaceholderName();
 			currentPlanPath = path.join(plansDir, planFileName);
-			hasRequestedRename = false;
 
 			try {
 				fs.mkdirSync(plansDir, { recursive: true });
@@ -151,14 +149,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		persistState();
 
 		// Inject plan content as context for execution
-		pi.sendMessage(
-			{
-				customType: "plan-approval",
-				content: `[PLAN APPROVED - STARTING EXECUTON]\n\nHere's the plan to execute:\n\n---\n\n${planContent}\n\n---\n\nPlease execute this plan.`,
-				display: true,
-			},
-			{ triggerTurn: true },
-		);
+		pi.sendMessage({
+			customType: "plan-approval",
+			content: `[PLAN APPROVED - STARTING EXECUTION]\n\nHere's the plan to execute:\n\n---\n\n${planContent}\n\n---\n\nPlease execute this plan.`,
+			display: true,
+		});
 	}
 
 	function persistState(): void {
@@ -274,15 +269,46 @@ IMPORTANT: You CANNOT exit plan mode. The user must manually exit using the /pla
 		};
 	});
 
-	// Read plan file content and ask model for filename suggestion
-	pi.on("turn_end", async (event) => {
+	// Auto-rename plan file based on content using LLM
+	let pendingRenameContent: string | null = null;
+
+	pi.on("agent_end", async (event) => {
+		// If we have pending content from previous turn, check for LLM response
+		if (pendingRenameContent) {
+			for (const msg of event.messages) {
+				if (msg.role === "assistant") {
+					const content = typeof msg.content === "string" ? msg.content : "";
+					// Extract filename from LLM response
+					const filenameMatch = content.match(/^([a-zA-Z0-9_\-]+\.md)$/m);
+					if (filenameMatch && filenameMatch[1]) {
+						const sanitized = sanitizeFilename(filenameMatch[1]);
+						if (sanitized && sanitized !== path.basename(pendingRenameContent)) {
+							const dir = path.dirname(pendingRenameContent);
+							const newPath = path.join(dir, sanitized);
+							try {
+								fs.renameSync(pendingRenameContent, newPath);
+								currentPlanPath = newPath;
+								persistState();
+								console.log(`Plan file auto-renamed to: ${sanitized}`);
+							} catch (error) {
+								console.error("Failed to rename plan file:", error);
+							}
+						}
+						break;
+					}
+				}
+			}
+			pendingRenameContent = null;
+			return;
+		}
+
+		// New rename request - check if we need to ask LLM
 		if (!planModeEnabled || !currentPlanPath) return;
 
-		// Check if this looks like a placeholder filename that should be renamed
 		const isPlaceholder = /draft-[\w]+-[a-z0-9]+\.md$/.test(path.basename(currentPlanPath));
-		if (!isPlaceholder || hasRequestedRename) return;
+		if (!isPlaceholder) return;
 
-		// Read the actual plan file content
+		// Read plan content
 		let planContent = "";
 		try {
 			planContent = fs.readFileSync(currentPlanPath, "utf-8");
@@ -291,61 +317,19 @@ IMPORTANT: You CANNOT exit plan mode. The user must manually exit using the /pla
 			return;
 		}
 
-		// Don't prompt if there's barely any content
+		// Skip if barely any content
 		if (planContent.length < 200) return;
 
-		hasRequestedRename = true;
-
-		// Ask model to suggest a filename based on actual plan content
+		// Ask LLM to suggest a filename (hidden from user)
+		pendingRenameContent = currentPlanPath;
 		pi.sendMessage(
 			{
 				customType: "plan-filename-request",
-				content: `Based on this plan content, suggest a short filename (or say 'keep' if current name is fine):\n\n---\n\n${planContent}\n\n---\n\nRespond with only the filename (e.g., 'fix-bug.md' or 'keep')`,
-				display: true,
+				content: `Analyze this plan and suggest a short filename. Respond with only the filename (e.g., 'fix-memory-leak.md'):\n\n${planContent.slice(0, 1000)}`,
+				display: false,
 			},
 			{ triggerTurn: true },
 		);
-	});
-
-	// Track model responses for filename suggestions
-	pi.on("agent_end", async (event) => {
-		if (!planModeEnabled || !currentPlanPath) return;
-
-		const isPlaceholder = /draft-[\w]+-[a-z0-9]+\.md$/.test(path.basename(currentPlanPath));
-		if (!isPlaceholder) return;
-
-		// Look for the filename suggestion in recent messages
-		for (const msg of event.messages) {
-			if (msg.role !== "user") continue;
-
-			const content = typeof msg.content === "string" ? msg.content : "";
-			// Check if user said "keep" or similar
-			if (content.trim().toLowerCase() === "keep") {
-				break;
-			}
-
-			// Check if this looks like a filename response (short, ends in .md, no special chars)
-			const filenameMatch = content.match(/^([a-zA-Z0-9_\-]+\.md)$/);
-
-			if (filenameMatch && filenameMatch[1]) {
-				const newFilename = sanitizeFilename(filenameMatch[1]);
-				if (newFilename && newFilename !== path.basename(currentPlanPath)) {
-					const dir = path.dirname(currentPlanPath);
-					const newPath = path.join(dir, newFilename);
-
-					try {
-						fs.renameSync(currentPlanPath, newPath);
-						const oldPath = currentPlanPath;
-						currentPlanPath = newPath;
-						persistState();
-						console.log(`Plan file renamed: ${oldPath} -> ${newPath}`);
-					} catch (error) {
-						console.error("Failed to rename plan file:", error);
-					}
-				}
-				break;
-			}
-		}
 	});
 
 	// Restore state on session start/resume
