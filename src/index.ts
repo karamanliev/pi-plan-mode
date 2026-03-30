@@ -133,7 +133,7 @@ The user will run /plan when they're ready for you to start making changes.`;
 		);
 		const lastEntry = planEntries.length > 0 ? planEntries[planEntries.length - 1] : null;
 
-		if (lastEntry?.data?.active === true) {
+		if (lastEntry && "data" in lastEntry && (lastEntry as any).data?.active === true) {
 			planModeEnabled = true;
 			updateStatus(ctx);
 			ctx.ui.notify("ℹ️ Plan mode restored", "info");
@@ -175,15 +175,13 @@ The user will run /plan when they're ready for you to start making changes.`;
 					};
 				}
 
-				const keyResult = await ctx.modelRegistry.getApiKeyAndHeaders(currentModel);
-				if (!keyResult.ok) {
+				const apiKey = await ctx.modelRegistry.getApiKey(currentModel);
+				if (!apiKey) {
 					return {
 						block: true,
-						reason: `Plan mode: cannot review command (${keyResult.error}).`,
+						reason: "Plan mode: cannot review command (no API key).",
 					};
 				}
-
-				const apiKey = keyResult.apiKey;
 
 				const response = await completeSimple(
 					currentModel,
@@ -203,7 +201,7 @@ The user will run /plan when they're ready for you to start making changes.`;
 							},
 						],
 					},
-					{ apiKey, headers: keyResult.headers, maxTokens: 256 },
+					{ apiKey, maxTokens: 256 },
 				);
 
 				const text = response.content
@@ -230,7 +228,7 @@ The user will run /plan when they're ready for you to start making changes.`;
 				}
 
 				return;
-			} catch (error) {
+			} catch (error: any) {
 				console.error(`Plan mode AI review failed:`, error);
 
 				const allowed = await ctx.ui.confirm(
