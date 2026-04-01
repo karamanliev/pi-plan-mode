@@ -1,9 +1,8 @@
 # Project Notes
 
-## Build and Check
+## Type-check
 
-- Build with `npm run build`
-- Clean with `npm run clean`
+- Type-check with `npm run typecheck`
 
 ## Release Process
 

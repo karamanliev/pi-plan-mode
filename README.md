@@ -43,8 +43,7 @@ Then enable it in pi via your packages/extensions configuration.
 
 ## Development
 
-- Build: `npm run build`
-- Clean: `npm run clean`
+- Type-check: `npm run typecheck`
 - Releases: see `docs/releases.md`
 
 ## License

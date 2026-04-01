@@ -7,10 +7,10 @@
     "url": "https://github.com/qmx/pi-plan-mode"
   },
   "type": "module",
-  "main": "dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./plan-mode.ts",
+  "types": "./plan-mode.ts",
   "files": [
-    "dist/**/*",
+    "plan-mode.ts",
     "README.md"
   ],
   "keywords": [
@@ -21,14 +21,12 @@
   ],
   "pi": {
     "extensions": [
-      "./dist/index.js"
+      "./plan-mode.ts"
     ]
   },
   "scripts": {
-    "clean": "rm -rf dist",
-    "build": "tsc -p tsconfig.build.json",
-    "dev": "tsc -p tsconfig.build.json --watch",
-    "prepublishOnly": "npm run clean && npm run build"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck"
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
