@@ -100,26 +100,32 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("before_agent_start", async (_event, ctx) => {
+		if (planModeEnabled) {
+			// Hide write/edit tools entirely from the agent
+			pi.setActiveTools(["read", "bash"]);
+		} else {
+			// Restore all tools
+			const allTools = pi.getAllTools().map((t) => t.name);
+			pi.setActiveTools(allTools);
+		}
+
 		if (!planModeEnabled) return;
 
-		const instructions = `[PLAN MODE ACTIVE - DO NOT EXECUTE]
+		const instructions = `[PLAN MODE ACTIVE]
 
 You are in plan mode. This is a PLANNING PHASE only.
 
-Rules:
-- You can READ any file to understand the codebase
-- You can run bash commands for exploration (safe commands allowed, others reviewed)
-- You CANNOT write or edit files (tools are blocked)
-- Help the user plan what needs to be done
-- Discuss the approach, identify files, understand the problem
-- When ready, remind the user to run /plan to exit plan mode
+Available tools:
+- read: Read files to understand the codebase
+- bash: Run commands for exploration (safe commands allowed, others reviewed)
 
-DO NOT:
-- Try to write or edit files (tools are blocked)
-- Start implementing changes
-- Assume approval to execute
+Note: write and edit tools are disabled in plan mode.
 
-The user will run /plan when they're ready for you to start making changes.`;
+Help the user plan what needs to be done:
+- Explore the codebase
+- Discuss the approach
+- Identify files that need changes
+- When ready, remind the user to run /plan to exit plan mode`;
 
 		return {
 			systemPrompt: _event.systemPrompt + "\n\n" + instructions,
@@ -161,6 +167,14 @@ The user will run /plan when they're ready for you to start making changes.`;
 				return {
 					block: true,
 					reason: "Plan mode: mutating git commands are not allowed.",
+				};
+			}
+
+			// Block commands with shell redirects (>, >>) - these write to files
+			if (REDIRECT_PATTERN.test(command)) {
+				return {
+					block: true,
+					reason: "Plan mode: file redirects are not allowed.",
 				};
 			}
 
